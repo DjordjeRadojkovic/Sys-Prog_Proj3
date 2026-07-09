@@ -9,7 +9,7 @@ namespace project_3.Messages
     public class SaveCache
     {
         public string KeyWord { get; }
-        public List<Article> articles;
+        public List<Article>? articles;
 
         public SaveCache(string kw, List<Article> a)
         {

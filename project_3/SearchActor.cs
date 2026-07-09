@@ -10,19 +10,24 @@ using static System.Net.WebRequestMethods;
 using dotenv.net;
 using System.Text.Json.Nodes;
 using Newtonsoft.Json.Linq;
+using Project_3;
+using Microsoft.ML;
+using Microsoft.ML.Data;
 
 namespace project_3
 {
     public class SearchActor : ReceiveActor
     {
         IActorRef cacheActor;
+        private readonly PredictionEngine<SentimentModel.ModelInput, SentimentModel.ModelOutput> _engine;
         public SearchActor(IActorRef cA)
         {
             cacheActor = cA;
+            _engine = SentimentModel.CreatePredictEngine();
 
             Receive<RequestMsg>(msg =>
             {
-                cacheActor.Tell(msg);
+                cacheActor.Tell(msg); //get from cache
             });
             Receive<SearchResault>(msg => SendResponse(msg));
             Receive<CacheMiss>(msg => NewsAPICall(msg));
@@ -38,7 +43,7 @@ namespace project_3
                 if (msg.articles == null)
                 {
                     HttpHelper.SendError(context, 404, $"Artikli ne postoje: {keyword}");
-                    Logger.Log($"[{Self.Path.Name}] 404: {keyword}");
+                    Logger.Log($"404: {keyword}");
                     return;
                 }
 
@@ -58,24 +63,28 @@ namespace project_3
                 context.Response.OutputStream.Write(data, 0, data.Length);
                 context.Response.OutputStream.Close();
 
-                Logger.Log($"[{Self.Path.Name}] 200: {keyword}");
+                Logger.Log($"200: {keyword}");
             }
             catch (Exception ex)
             {
-                Logger.Log($"[{Self.Path.Name}] GRESKA pri slanju odgovora za {keyword}: {ex.Message}");
+                Logger.Log($"GRESKA pri slanju odgovora za {keyword}: {ex.Message}");
                 try { HttpHelper.SendError(context, 500, "Interna greska servera"); } catch { }
             }
         }
         private void NewsAPICall(CacheMiss msg)
         {
+            Logger.Log($"Cache miss: {msg.keyword}");
             var replyTo = Sender;
+
             HttpClient client = new HttpClient();
             client.DefaultRequestHeaders.Add(
             "User-Agent",
             "NewsSentimentApp/1.0");
+
             DotEnv.Load();
             string? api_key = Environment.GetEnvironmentVariable("API_KEY");
             string url = $"https://newsapi.org/v2/everything?q={msg.keyword.Trim()}&apiKey={api_key}";
+
             IObservable<string> ApiCall(string url)
             {
                 return Observable.FromAsync(async ct =>
@@ -87,9 +96,7 @@ namespace project_3
                         response.EnsureSuccessStatusCode();
                     }catch(HttpRequestException ex)
                     {
-                        Logger.Log($"Greska pri Api pozivu: {msg.keyword}\n{ex.Message}");
-                        HttpHelper.SendError(msg.request._context, 400, ex.Message);
-                        Sender.Tell(new ApiError(msg.keyword));
+                        replyTo.Tell(new ApiError(msg.keyword));
                     }
                     return await response.Content.ReadAsStringAsync();
                 });
@@ -103,13 +110,10 @@ namespace project_3
                     List<Article> articles = new List<Article>();
                     foreach (var item in parsed["articles"])
                     {
-                        articles.Add(new Article
-                        {
-                            title = item["title"].ToString(),
-                            content = item["content"].ToString()
-                            //senti analiza
-                        });
-
+                        var ModelData = new SentimentModel.ModelInput() { Col0 = item["content"].ToString() };
+                        var res = _engine.Predict(ModelData);
+                        string senti = res.PredictedLabel == 1 ? "Positive!" : "Negative!";
+                        articles.Add(new Article(item["title"].ToString(), item["content"].ToString(), senti));
                     }
                     replyTo.Tell(new SaveCache(msg.keyword, articles));
                 },

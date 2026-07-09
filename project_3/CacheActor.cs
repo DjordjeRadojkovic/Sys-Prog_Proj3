@@ -30,9 +30,19 @@ namespace project_3
             Receive<RequestMsg>(msg  => HandleRequest(msg));
             Receive<SaveCache>(msg => HandleSaveCache(msg));
             Receive<ApiError>(msg => {
+                //remove waitlist keyword
                 if (!_waiting.TryGetValue(msg.keyword, out var waiters))
                     return;
                 _waiting.Remove(msg.keyword);
+                //Send back error
+                foreach (var (requester, request) in waiters)
+                {
+                    string error = request.GetKeyword();
+                    if (string.IsNullOrEmpty(request.GetKeyword()))
+                        error = "Unesite kljucnu rec!";
+                    HttpHelper.SendError(request._context, 400, $"Greska pri API pozuvu: {error}");
+                    Logger.Log($"Greska pri API pozuvu 400: {error}");
+                }
             });
         }
 
@@ -46,42 +56,34 @@ namespace project_3
                 Sender.Tell(new SearchResault(msg,entry.articles));
                 return;
             }
-
+            //Cache miss: add waiting
             if(_waiting.TryGetValue(msg.GetKeyword(),out var waiters))
             {
                 Logger.Log($"Cache wait: {msg.GetKeyword()}");
                 waiters.Add((Sender,msg));
                 return;
             }
-
+            //first calls api
             _waiting[msg.GetKeyword()] = new List<(IActorRef,RequestMsg)> { (Sender, msg) };
             Sender.Tell(new CacheMiss(msg.GetKeyword(),msg));
-
-            /*Logger.Log($"Cache MISS: {msg.GetKeyword()}");
-            Observable.Start(() => NewsAPICall(msg), TaskPoolScheduler.Default)
-                .ToTask()
-                .PipeTo(Self,
-                success: data => new SearchResault(msg, data),
-                failure: ex =>
-                {
-                    Logger.Log($"Greska pri API pozivu: {msg.GetKeyword()}: {ex.Message}");
-                    return new SearchResault(msg, null);
-                });*/
         }
         private void HandleSaveCache(SaveCache msg)
         {
+            //remove waitlist keyword
             if (!_waiting.TryGetValue(msg.KeyWord, out var waiters))
                 return;
             _waiting.Remove(msg.KeyWord);
 
             if(msg.articles != null)
             {
-                if(_cache.Count >=5)
+                //remove oldest for lru
+                if(_cache.Count >= maxCount)
                 {
                     KeyValuePair<string,CacheEntry> oldest = _cache.OrderBy(x=>x.Value.cachedAt).FirstOrDefault();
                     _cache.Remove(oldest.Key);
                     Logger.Log($"Cache evict: {oldest.Key}");
                 }
+                //add to cahce
                 _cache[msg.KeyWord] = new CacheEntry { articles = msg.articles, cachedAt=DateTime.Now };
                 Logger.Log($"Cache add: {msg.KeyWord}");
             }

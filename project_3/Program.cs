@@ -17,7 +17,7 @@ namespace proj3
     {
         const int PORT = 5050;
         const int MAX_WORKERS = 5;
-        const int MAX_CACHED_FILES = 50;
+        const int MAX_CACHED_FILES = 5;
         static async Task Main(string[] args)
         {
             Config config = ConfigurationFactory.ParseString(@"
@@ -31,12 +31,12 @@ namespace proj3
                     }
                 }");
 
-            ActorSystem system = ActorSystem.Create("GifServerSystem", config);
+            ActorSystem system = ActorSystem.Create("NewsAPICallSystem", config);
 
             IActorRef logActor = system.ActorOf(Props.Create<LogActor>(), "logger");
             Logger.Init(logActor);
 
-            IActorRef cacheActor = system.ActorOf(Props.Create(() => new CacheActor(5)), "cache");
+            IActorRef cacheActor = system.ActorOf(Props.Create(() => new CacheActor(MAX_CACHED_FILES)), "cache");
 
             IActorRef workerRouter = system.ActorOf(
                 Props.Create(() => new SearchActor(cacheActor))
@@ -47,7 +47,7 @@ namespace proj3
             HttpListener listener = new HttpListener();
             listener.Prefixes.Add($"http://localhost:{PORT}/");
             listener.Start();
-
+            Logger.Log("Server Started!");
             IObservable<HttpListenerContext> requestStream =
                 Observable.FromAsync(() => listener.GetContextAsync())
                           .Repeat()
@@ -83,8 +83,8 @@ namespace proj3
 
             listener.Stop();
             subscription.Dispose();
+            Logger.Log("Stopped!");
             await system.Terminate();
-            Console.WriteLine("Stopped!");
         }
     }
 }

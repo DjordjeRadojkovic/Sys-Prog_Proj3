@@ -11,15 +11,16 @@ namespace project_3
     {
         public string title;
         public string content;
-        public string sentiment = "Negative!";
+        public string sentiment = "Neodredjen!";
         public Article()
         {
             
         }
-        public Article(string n, int senti)
+        public Article(string n, string con, string senti)
         {
             title = n;
-            sentiment = senti == 1 ? "Pozitivan!" : "Negativan!";
+            content = con;
+            sentiment = senti;
         }
     }
 }
